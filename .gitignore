@@ -267,6 +267,12 @@ paket-files/
 .idea/
 *.sln.iml
 
+# VSCode settings
+.vscode/**
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
 # CodeRush
 .cr/
 
@@ -388,3 +394,6 @@ public
 
 # visual studio code launch configuration
 launch.json
+
+# Ignore dynamic template
+images/*/*-temp.json

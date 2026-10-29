@@ -1,17 +1,22 @@
 param(
     [String] [Parameter (Mandatory=$true)] $TemplatePath,
+    [String] [Parameter (Mandatory=$true)] $BuildTemplateName,
     [String] [Parameter (Mandatory=$true)] $ClientId,
-    [String] [Parameter (Mandatory=$true)] $ClientSecret,
-    [String] [Parameter (Mandatory=$true)] $GitHubFeedToken,
-    [String] [Parameter (Mandatory=$true)] $ResourcesNamePrefix,
+    [String] [Parameter (Mandatory=$false)] $ClientSecret,
     [String] [Parameter (Mandatory=$true)] $Location,
-    [String] [Parameter (Mandatory=$true)] $ResourceGroup,
-    [String] [Parameter (Mandatory=$true)] $StorageAccount,
+    [String] [Parameter (Mandatory=$true)] $ImageName,
+    [String] [Parameter (Mandatory=$true)] $ImageResourceGroupName,
+    [String] [Parameter (Mandatory=$true)] $TempResourceGroupName,
     [String] [Parameter (Mandatory=$true)] $SubscriptionId,
     [String] [Parameter (Mandatory=$true)] $TenantId,
-    [String] [Parameter (Mandatory=$true)] $VirtualNetworkName,
-    [String] [Parameter (Mandatory=$true)] $VirtualNetworkRG,
-    [String] [Parameter (Mandatory=$true)] $VirtualNetworkSubnet
+    [String] [Parameter (Mandatory=$true)] $ImageOS, # e.g. "ubuntu22", "ubuntu24" or "win22", "win25"
+    [String] [Parameter (Mandatory=$false)] $UseAzureCliAuth = "false",
+    [String] [Parameter (Mandatory=$false)] $PluginVersion = "2.3.3",
+    [String] [Parameter (Mandatory=$false)] $VirtualNetworkName,
+    [String] [Parameter (Mandatory=$false)] $VirtualNetworkRG,
+    [String] [Parameter (Mandatory=$false)] $VirtualNetworkSubnet,
+    [String] [Parameter (Mandatory=$false)] $AllowedInboundIpAddresses = "[]",
+    [hashtable] [Parameter (Mandatory=$false)] $Tags = @{}
 )
 
 if (-not (Test-Path $TemplatePath))
@@ -20,11 +25,8 @@ if (-not (Test-Path $TemplatePath))
     exit 1
 }
 
-$Image = [io.path]::GetFileNameWithoutExtension($TemplatePath)
-$TempResourceGroupName = "${ResourcesNamePrefix}_${Image}"
+$buildName = $($BuildTemplateName).Split(".")[1]
 $InstallPassword = [System.GUID]::NewGuid().ToString().ToUpper()
-
-packer validate -syntax-only $TemplatePath
 
 $SensitiveData = @(
     'OSType',
@@ -36,25 +38,36 @@ $SensitiveData = @(
     ':  ->'
 )
 
+$azure_tags = $Tags | ConvertTo-Json -Compress
+
 Write-Host "Show Packer Version"
 packer --version
 
-Write-Host "Build $Image VM"
-packer build    -var "capture_name_prefix=$ResourcesNamePrefix" `
+Write-Host "Download packer plugins"
+packer plugins install github.com/hashicorp/azure $pluginVersion
+
+Write-Host "Validate packer template"
+packer validate -syntax-only -only "$buildName.*" $TemplatePath
+
+Write-Host "Build $buildName VM"
+packer build    -only "$buildName.*" `
                 -var "client_id=$ClientId" `
                 -var "client_secret=$ClientSecret" `
                 -var "install_password=$InstallPassword" `
-                -var "github_feed_token=$GitHubFeedToken" `
                 -var "location=$Location" `
-                -var "resource_group=$ResourceGroup" `
-                -var "storage_account=$StorageAccount" `
+                -var "image_os=$ImageOS" `
+                -var "managed_image_name=$ImageName" `
+                -var "managed_image_resource_group_name=$ImageResourceGroupName" `
                 -var "subscription_id=$SubscriptionId" `
                 -var "temp_resource_group_name=$TempResourceGroupName" `
                 -var "tenant_id=$TenantId" `
                 -var "virtual_network_name=$VirtualNetworkName" `
                 -var "virtual_network_resource_group_name=$VirtualNetworkRG" `
                 -var "virtual_network_subnet_name=$VirtualNetworkSubnet" `
-                -var "run_validation_diskspace=$env:RUN_VALIDATION_FLAG" `
+                -var "allowed_inbound_ip_addresses=$($AllowedInboundIpAddresses)" `
+                -var "use_azure_cli_auth=$UseAzureCliAuth" `
+                -var "azure_tags=$azure_tags" `
+                -color=false `
                 $TemplatePath `
         | Where-Object {
             #Filter sensitive data from Packer logs
